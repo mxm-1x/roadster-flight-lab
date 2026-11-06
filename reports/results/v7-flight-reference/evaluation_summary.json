@@ -1,0 +1,12 @@
+{
+  "simulator_version": 7,
+  "stage": "flight",
+  "variant": "reference",
+  "seed": 0,
+  "episodes": 20,
+  "model_sha256": "7277d674237360f8141f990375296b584a05cba6ca8143ea73e6f9784136de3e",
+  "safe_landing_rate": 0.2,
+  "crash_rate": 0.8,
+  "timeout_rate": 0.0,
+  "mean_native_return": -50.33996078438667
+}

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocket-landing-reward-shaping"
+version = "0.1.0"
+description = "Reproducible PPO reward-shaping experiments for an original Roadster flight-control simulator."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "gymnasium[box2d]==1.4.0",
+    "stable-baselines3==2.9.2",
+    "torch==2.15.0",
+    "numpy==2.3.4",
+    "pandas==2.3.3",
+    "streamlit==1.66.1",
+    "plotly==7.1.0",
+    "imageio==2.37.0",
+    "pillow==12.0.0",
+    "rapier3d==0.36.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2"]
+
+[project.scripts]
+rocket-landing = "rocket_landing.cli:main"
+rocket-landing-web = "rocket_landing.web:main"
+
+[tool.setuptools.packages.find]
+include = ["rocket_landing*"]
+
+[tool.setuptools.package-data]
+rocket_landing = ["configs/*.json", "web_assets/*.html", "web_assets/*.css", "web_assets/*.js", "web_assets/assets/*", "web_assets/data/*.json", "web_assets/data/runs/*/*.json", "web_assets/data/flights/*/*/evaluation/*.json", "web_assets/data/flights/*/*/checkpoint/*.json", "web_assets/data/flights/*/*/recorded/*/*.json", "web_assets/data/roadster/*.json", "web_assets/data/roadster/flights/*/*/*.json", "web_assets/data/roadster/curves/*/*/*.json", "web_assets/data/roadster/training_bundles/*/*/*.bin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

@@ -1,0 +1,16 @@
+.venv
+.git
+outputs
+__pycache__
+.pytest_cache
+tests
+*.egg-info
+
+frontend/node_modules
+
+dist
+.agents
+.codex
+.claude
+.env
+.env.*
