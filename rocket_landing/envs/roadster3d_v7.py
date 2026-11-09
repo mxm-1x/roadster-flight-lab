@@ -574,13 +574,22 @@ class RoadsterLanding3DEnv(gym.Env[np.ndarray, np.ndarray]):
         if options and options.get("phase") == "flight":
             assert self._world is not None and self._vehicle is not None and self._vehicle_handle is not None
             target = self._target
-            spawn = np.asarray((target[0] + self.np_random.uniform(-1.5, 1.5),
-                                self.np_random.uniform(2.5, 4.0),
-                                target[2] + self.np_random.uniform(-1.0, 1.0)))
+            profile = int(options.get("flight_profile", 2))
+            if profile == 0:
+                height_range, down_range, horizontal_jitter, position_jitter = (4.0, 4.5), (-0.05, 0.05), 0.0, 0.0
+            elif profile == 1:
+                height_range, down_range, horizontal_jitter, position_jitter = (3.5, 4.5), (-0.3, -0.1), 0.2, 0.5
+            elif profile == 2:
+                height_range, down_range, horizontal_jitter, position_jitter = (2.5, 4.0), (-1.0, -0.2), 0.5, 1.5
+            else:
+                raise ValueError("flight_profile must be 0 (easy), 1 (medium), or 2 (original).")
+            spawn = np.asarray((target[0] + self.np_random.uniform(-position_jitter, position_jitter),
+                                self.np_random.uniform(*height_range),
+                                target[2] + self.np_random.uniform(-position_jitter, position_jitter)))
             shift = spawn - _vec(self._vehicle.translation)
-            initial_velocity = (float(self.np_random.uniform(-0.5, 0.5)),
-                                float(self.np_random.uniform(-1.0, -0.2)),
-                                float(self.np_random.uniform(-0.5, 0.5)))
+            initial_velocity = (float(self.np_random.uniform(-horizontal_jitter, horizontal_jitter)),
+                                float(self.np_random.uniform(*down_range)),
+                                float(self.np_random.uniform(-horizontal_jitter, horizontal_jitter)))
             wheel_handles = [self._world.impulse_joints[h].body2 for h in self._wheel_joints]
             for handle in [self._vehicle_handle, *self._carrier_handles, *wheel_handles]:
                 body = self._world.rigid_bodies[handle]

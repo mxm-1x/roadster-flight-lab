@@ -12,7 +12,9 @@ fullWidth: true
 
 [Live interactive demo](https://msmxii-landing-lab.static.hf.space/index.html?build=v7-research)
 · [Longer-training diagnosis](reports/training-diagnosis.md)
+· [Curriculum and propulsion pilot](reports/curriculum-improvement.md)
 · [Episode-level results](reports/results)
+· [Propulsion sensitivity episodes](reports/results/propulsion-sensitivity.csv)
 
 To preview the saved experiments locally after installing the Python dependencies:
 
@@ -57,6 +59,15 @@ small exploratory runs with different budgets, not a controlled reward
 comparison. More simulator calibration and independent training runs are
 needed before claiming reliable performance.
 
+The next experiment adds a success-gated flight-start curriculum and a
+touchdown-aware reward. Its first 102,400-step pilot also landed safely in
+0/100 stage-0 scenarios, so the policy change alone did not solve the task.
+An accompanying reference-controller sensitivity check found safe landings
+rose from 0/20 to 20/20 when the assumed propellant mass increased from 80 kg
+to 240 kg. This uncalibrated parameter sweep points to limited propulsion
+capacity as a major constraint; see the linked report before interpreting the
+result as a model improvement.
+
 ```bash
 # Train and evaluate a flight-start pilot using the Python v7 simulator.
 python -m rocket_landing.cli roadster3d-v7-train \
@@ -64,6 +75,15 @@ python -m rocket_landing.cli roadster3d-v7-train \
 python -m rocket_landing.cli roadster3d-v7-evaluate \
   --model outputs/roadster3d_v7/flight/potential_shaping/seed_0/model.zip \
   --variant potential_shaping --seed 0 --stage flight --episodes 100
+
+# New experimental curriculum and touchdown-aware reward.
+python -m rocket_landing.cli roadster3d-v7-train \
+  --variant landing_guidance --seed 0 --stage flight_curriculum \
+  --timesteps 102400 --output-dir outputs/curriculum_v1
+python -m rocket_landing.cli roadster3d-v7-evaluate \
+  --model outputs/curriculum_v1/roadster3d_v7/flight_curriculum/landing_guidance/seed_0/model.zip \
+  --variant landing_guidance --seed 0 --stage flight_curriculum \
+  --profile 0 --episodes 100 --output-dir outputs/curriculum_v1/eval_profile_0
 
 # Optional full task, initialized from the flight curriculum checkpoint.
 python -m rocket_landing.cli roadster3d-v7-train \

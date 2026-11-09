@@ -34,6 +34,7 @@ from rocket_landing.roadster3d_experiment import (
     write_roadster3d_comparison,
 )
 from rocket_landing import roadster3d_experiment_v7 as roadster_v7
+from rocket_landing.roadster3d_rewards import ROADSTER3D_V7_VARIANTS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -113,18 +114,19 @@ def build_parser() -> argparse.ArgumentParser:
     roadster3d_report.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
 
     v7_train = subparsers.add_parser("roadster3d-v7-train", help="Train v7 articulated 3D PPO.")
-    v7_train.add_argument("--variant", choices=ROADSTER_VARIANTS, required=True)
+    v7_train.add_argument("--variant", choices=ROADSTER3D_V7_VARIANTS, required=True)
     v7_train.add_argument("--seed", type=int, required=True)
-    v7_train.add_argument("--stage", choices=("full", "flight"), default="full")
+    v7_train.add_argument("--stage", choices=("full", "flight", "flight_curriculum", "flight_profile_0", "flight_profile_1", "flight_profile_2"), default="full")
     v7_train.add_argument("--timesteps", type=int, default=ROADSTER3D_TIMESTEPS)
     v7_train.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     v7_train.add_argument("--init-model", type=Path)
 
     v7_evaluate = subparsers.add_parser("roadster3d-v7-evaluate", help="Evaluate a v7 3D checkpoint.")
     v7_evaluate.add_argument("--model", type=Path, required=True)
-    v7_evaluate.add_argument("--variant", choices=ROADSTER_VARIANTS, required=True)
+    v7_evaluate.add_argument("--variant", choices=ROADSTER3D_V7_VARIANTS, required=True)
     v7_evaluate.add_argument("--seed", type=int, required=True)
-    v7_evaluate.add_argument("--stage", choices=("full", "flight"), default="full")
+    v7_evaluate.add_argument("--stage", choices=("full", "flight", "flight_curriculum", "flight_profile_0", "flight_profile_1", "flight_profile_2"), default="full")
+    v7_evaluate.add_argument("--profile", type=int, choices=(0, 1, 2), default=2, help="Fixed difficulty profile for curriculum evaluation.")
     v7_evaluate.add_argument("--episodes", type=int, default=ROADSTER3D_EVAL_EPISODES)
     v7_evaluate.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     return parser
@@ -179,7 +181,7 @@ def main() -> None:
     elif args.command == "roadster3d-v7-train":
         print(roadster_v7.train_roadster3d_run(args.variant, args.seed, args.timesteps, args.output_dir, stage=args.stage, init_model=args.init_model))
     elif args.command == "roadster3d-v7-evaluate":
-        _, summary = roadster_v7.evaluate_roadster3d_run(args.model, args.variant, args.seed, args.episodes, args.output_dir, stage=args.stage)
+        _, summary = roadster_v7.evaluate_roadster3d_run(args.model, args.variant, args.seed, args.episodes, args.output_dir, stage=args.stage, profile=args.profile)
         for key, value in summary.items():
             print(f"{key}: {value}")
 

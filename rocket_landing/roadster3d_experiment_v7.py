@@ -34,8 +34,7 @@ from rocket_landing.envs.roadster3d_v7 import (
     RoadsterLanding3DEnv,
     RoadsterPhysics3D,
 )
-from rocket_landing.roadster_rewards import ROADSTER_LABELS, ROADSTER_VARIANTS
-from rocket_landing.roadster3d_rewards import apply_roadster3d_reward
+from rocket_landing.roadster3d_rewards import ROADSTER3D_V7_LABELS, ROADSTER3D_V7_VARIANTS, apply_roadster3d_reward
 
 
 ROADSTER3D_SEEDS = (0, 1, 2, 3, 4)
@@ -66,12 +65,12 @@ def roadster3d_root(output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> Path:
 
 
 def roadster3d_run_dir(output_dir: Path | str, variant: str, seed: int, stage: str = "full") -> Path:
-    if variant not in ROADSTER_VARIANTS:
-        raise ValueError(f"variant must be one of {ROADSTER_VARIANTS}.")
+    if variant not in ROADSTER3D_V7_VARIANTS:
+        raise ValueError(f"variant must be one of {ROADSTER3D_V7_VARIANTS}.")
     if seed < 0:
         raise ValueError("seed must be nonnegative.")
-    if stage not in {"full", "flight"}:
-        raise ValueError("stage must be full or flight")
+    if stage not in {"full", "flight", "flight_curriculum", "flight_profile_0", "flight_profile_1", "flight_profile_2"}:
+        raise ValueError("unsupported v7 training stage")
     return roadster3d_root(output_dir) / stage / variant / f"seed_{seed}"
 
 
@@ -104,6 +103,12 @@ class Roadster3DRecorder(gym.Wrapper):
 
     def step(self, action):
         observation, reward, terminated, truncated, info = self.env.step(action)
+        if "curriculum_advanced_to_profile" in info:
+            with (self.directory / "curriculum_events.csv").open("a", newline="") as file:
+                writer = csv.writer(file)
+                if file.tell() == 0:
+                    writer.writerow(("episode", "to_profile", "triggering_window_success_rate"))
+                writer.writerow((self.episode + 1, info["curriculum_advanced_to_profile"], 0.70))
         self.rows.append(dict(info["telemetry"]))
         self.phases.append(str(info["phase"]))
         self.actions.append(np.asarray(info["action_applied"], dtype=np.float32).copy())
@@ -137,8 +142,36 @@ class Roadster3DRecorder(gym.Wrapper):
 class FlightStart(gym.Wrapper):
     """Curriculum episodes begin in the air over the pad, not on the ramp."""
 
+    def __init__(self, env: gym.Env, profile: int = 2):
+        super().__init__(env)
+        self.profile = profile
+
     def reset(self, *, seed=None, options=None):
-        return self.env.reset(seed=seed, options={**(options or {}), "phase": "flight"})
+        return self.env.reset(seed=seed, options={**(options or {}), "phase": "flight", "flight_profile": self.profile})
+
+
+class SuccessGatedFlightCurriculum(gym.Wrapper):
+    """Progress to harder flight starts after 70 safe landings in a 100-episode window."""
+
+    def __init__(self, env: gym.Env):
+        super().__init__(env)
+        self.profile = 0
+        self.outcomes: list[bool] = []
+
+    def reset(self, *, seed=None, options=None):
+        return self.env.reset(seed=seed, options={**(options or {}), "phase": "flight", "flight_profile": self.profile})
+
+    def step(self, action):
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        if terminated or truncated:
+            self.outcomes.append(bool(info.get("safe_landing", False)))
+            self.outcomes = self.outcomes[-100:]
+            if self.profile < 2 and len(self.outcomes) == 100 and sum(self.outcomes) >= 70:
+                self.profile += 1
+                self.outcomes.clear()
+                info = dict(info)
+                info["curriculum_advanced_to_profile"] = self.profile
+        return observation, reward, terminated, truncated, info
 
 
 def make_roadster3d_env(
@@ -146,9 +179,13 @@ def make_roadster3d_env(
 ):
     env: gym.Env = apply_roadster3d_reward(RoadsterLanding3DEnv(), variant)
     if stage == "flight":
-        env = FlightStart(env)
+        env = FlightStart(env, 2)
+    elif stage in {"flight_profile_0", "flight_profile_1", "flight_profile_2"}:
+        env = FlightStart(env, int(stage[-1]))
+    elif stage == "flight_curriculum":
+        env = SuccessGatedFlightCurriculum(env)
     elif stage != "full":
-        raise ValueError("stage must be full or flight")
+        raise ValueError("unsupported v7 stage")
     if trajectory_dir is not None:
         env = Roadster3DRecorder(env, trajectory_dir)
     if monitor_path is not None:
@@ -181,8 +218,8 @@ def train_roadster3d_run(
     stage: str = "full",
     init_model: Path | str | None = None,
 ) -> Path:
-    if variant not in ROADSTER_VARIANTS:
-        raise ValueError(f"variant must be one of {ROADSTER_VARIANTS}.")
+    if variant not in ROADSTER3D_V7_VARIANTS:
+        raise ValueError(f"variant must be one of {ROADSTER3D_V7_VARIANTS}.")
     if seed < 0 or timesteps <= 0 or checkpoint_interval <= 0:
         raise ValueError("seed must be nonnegative and step counts must be positive.")
     if init_model is not None:
@@ -192,7 +229,7 @@ def train_roadster3d_run(
             raise ValueError("Full-task warm starts require a v7 flight checkpoint and its metadata.")
         initial_metadata = json.loads(initial_metadata_path.read_text())
         if (initial_metadata.get("simulator_version") != SIMULATOR_VERSION_3D
-                or initial_metadata.get("stage") != "flight"
+                or initial_metadata.get("stage") not in {"flight", "flight_profile_1", "flight_profile_2"}
                 or initial_metadata.get("variant") != variant
                 or initial_metadata.get("physics_config") != RoadsterPhysics3D.from_config().to_dict()):
             raise ValueError("Warm-start checkpoint does not match the v7 flight curriculum and reward.")
@@ -259,7 +296,8 @@ def train_roadster3d_run(
             "physics_engine": "Rapier3D",
             "variant": variant,
             "stage": stage,
-            "variant_label": ROADSTER_LABELS[variant],
+            "variant_label": ROADSTER3D_V7_LABELS[variant],
+            "curriculum": ({"profiles": {"0": "4–4.5 m directly above pad, near-zero initial velocity", "1": "3.5–4.5 m with small position/velocity offsets", "2": "original 2.5–4 m distribution"}, "advance_after_episodes": 100, "safe_rate_threshold": 0.70} if stage == "flight_curriculum" else None),
             "seed": seed,
             "observation_fields": list(OBSERVATION_FIELDS_3D),
             "action_fields": list(ACTION_FIELDS_3D),
@@ -298,8 +336,9 @@ def train_roadster3d_run(
             env.close()
 
 
-def _evaluation_episode(model: PPO, seed: int, variant: str, path: Path, stage: str = "full") -> dict[str, Any]:
-    env = make_roadster3d_env(variant, stage=stage)
+def _evaluation_episode(model: PPO, seed: int, variant: str, path: Path, stage: str = "full", profile: int = 2) -> dict[str, Any]:
+    eval_stage = f"flight_profile_{profile}" if stage == "flight_curriculum" else stage
+    env = make_roadster3d_env(variant, stage=eval_stage)
     rows: list[dict[str, Any]] = []
     phases: list[str] = []
     actions: list[list[float]] = []
@@ -365,8 +404,9 @@ def evaluate_roadster3d_run(
     episodes: int = ROADSTER3D_EVAL_EPISODES,
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
     stage: str = "full",
+    profile: int = 2,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if variant not in ROADSTER_VARIANTS or episodes <= 0:
+    if variant not in ROADSTER3D_V7_VARIANTS or episodes <= 0 or profile not in (0, 1, 2):
         raise ValueError("Use a supported reward variant and a positive episode count.")
     model_path = Path(model_path)
     if not model_path.is_file():
@@ -390,6 +430,7 @@ def evaluate_roadster3d_run(
             variant,
             flight_dir / f"episode_{episode:04d}.npz",
             stage,
+            profile,
         )
         for episode in range(episodes)
     ]
@@ -407,7 +448,8 @@ def evaluate_roadster3d_run(
         "physics_engine": "Rapier3D",
         "variant": variant,
         "stage": stage,
-        "variant_label": ROADSTER_LABELS[variant],
+        "variant_label": ROADSTER3D_V7_LABELS[variant],
+        "evaluation_profile": profile if stage == "flight_curriculum" else None,
         "seed": seed,
         "episodes": episodes,
         "mean_reward_gap": float((frame["shaped_return"] - frame["native_return"]).mean()),
@@ -432,13 +474,13 @@ def run_roadster3d_experiments(
     timesteps: int = ROADSTER3D_TIMESTEPS,
     episodes: int = ROADSTER3D_EVAL_EPISODES,
     seeds: tuple[int, ...] = ROADSTER3D_SEEDS,
-    variants: tuple[str, ...] = ROADSTER_VARIANTS,
+    variants: tuple[str, ...] = ROADSTER3D_V7_VARIANTS,
     force: bool = False,
 ) -> pd.DataFrame:
     root = roadster3d_root(output_dir) / "full"
     root.mkdir(parents=True, exist_ok=True)
     for variant in variants:
-        if variant not in ROADSTER_VARIANTS:
+        if variant not in ROADSTER3D_V7_VARIANTS:
             raise ValueError(f"Unknown Roadster reward variant: {variant}")
         for seed in seeds:
             run_dir = roadster3d_run_dir(output_dir, variant, seed)
@@ -477,7 +519,7 @@ def run_roadster3d_experiments(
 def write_roadster3d_comparison(output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> pd.DataFrame:
     root = roadster3d_root(output_dir) / "full"
     summaries: list[dict[str, Any]] = []
-    for variant in ROADSTER_VARIANTS:
+    for variant in ROADSTER3D_V7_VARIANTS:
         for summary_path in sorted((root / variant).glob("seed_*/evaluation_summary.json")):
             metadata_path = summary_path.parent / "metadata.json"
             if not metadata_path.is_file():
